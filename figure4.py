@@ -5,7 +5,6 @@ from scipy.stats import binom
 import seaborn as sns
 cbcolors = sns.color_palette("colorblind").as_hex()
 
-
 plt.rcParams["font.size"] = 8
 
 coherences = [1, 5, 10, 20, 40]
@@ -14,8 +13,14 @@ coherences = [1, 5, 10, 20, 40]
 
 top_dir = os.path.join("decision_making_results")
 files = os.listdir(top_dir)
-with h5py.File(os.path.join(top_dir, files[0]), "r") as f:
+
+##
+
+with h5py.File(os.path.join(top_dir, files[10]), "r") as f:
     keys = list(f.keys())
+print(len(keys))
+
+##
 
 def get_hists_from_file(fname, model):
     hists = dict((c, []) for c in coherences)
@@ -36,10 +41,6 @@ def get_hists_from_file(fname, model):
     return hists
 
 def concat_dicts(list_of_dicts):
-    """
-    Concatenate corresponding values in list of dictionaries
-    """
-
     newdict = {}
     for key in list_of_dicts[0].keys():
         vals = [np.array(d[key]) for d in list_of_dicts]
@@ -48,8 +49,8 @@ def concat_dicts(list_of_dicts):
     return newdict
 
 
-exact_hists = concat_dicts([get_hists_from_file(os.path.join(top_dir, f), "approx") for f in files])
-approx_hists = concat_dicts([get_hists_from_file(os.path.join(top_dir, f), "exact") for f in files])
+exact_hists = concat_dicts([get_hists_from_file(os.path.join(top_dir, f), "exact") for f in files])
+approx_hists = concat_dicts([get_hists_from_file(os.path.join(top_dir, f), "approx") for f in files])
 
 
 def get_correct_rate(hists):
