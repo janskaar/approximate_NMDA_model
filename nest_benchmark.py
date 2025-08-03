@@ -1,21 +1,17 @@
-"""
-Runs benchmark for exact and approximate model for different size networks.
-"""
-
 import nest
 import numpy as np
-import time
+import sys, os, time
 
-outfile = "benchmark_nest.csv"
+runner_id = int(sys.argv[1])
+scale = float(sys.argv[2])
+n_threads = int(os.environ["SLURM_CPUS_PER_TASK"])
+
+outfile = os.path.join(f"benchmarking_data_{n_threads}_threads",  f"wang_benchmark_nest_{runner_id}.csv")
 
 dt = 0.1
 
 ##################################################
-# Set parameter values, taken from (Brunel and Wang, 2001).
-
-# fmt: off
 # conductances excitatory population
-#                                                               Verified from paper                                                                
 g_AMPA_ext_ex = 2.1              # external AMPA conductance     x
 g_AMPA_ex = 0.05                 # recurrent AMPA conductance    x
 g_NMDA_ex = 0.165                # recurrent GABA conductance    x
@@ -30,7 +26,7 @@ g_GABA_in = 1.0                  # recurrent GABA conductance    x
 # neuron parameters
 epop_params = {
     "tau_GABA": 5.0,            # GABA decay time constant      x
-    "tau_AMPA": 2.0,             # AMPA decay time consta7.419
+    "tau_AMPA": 2.0,             # AMPA decay time consta
     "tau_decay_NMDA": 100.0,     # NMDA decay time constant      x
     "tau_rise_NMDA": 2.0,        # NMDA rise time constant       x
     "alpha": 0.5,                # NMDA parameter                x
@@ -63,32 +59,34 @@ ipop_params = {
     "t_ref": 1.0,                # refreactory period            x
     "V_m": -70.                  # initial membrane potential
 }
-# fmt: on
 
 
 def run_sim(scale, model, seed=123):
 
+    N = 2560
     # number of neurons in each population
-    NE = int(1600 * scale)
-    NI = int(400 * scale)
-    
-    CE = NE
-    CI = NI
+    NE = int(N * 0.8 * scale)
+    NI = int(N * 0.2 * scale)
+
+    eparams = epop_params.copy()
+    iparams = ipop_params.copy()
 
 
     nest.ResetKernel()
     nest.set(resolution=dt,
-             print_time=True,
+             print_time=False,
              rng_seed=seed,
-             total_num_virtual_procs=8)
-
+             local_num_threads=n_threads)
+    print(f"local_num_threads={nest.local_num_threads}")
+    print(f"total_num_virtual_procs={nest.total_num_virtual_procs}")
+    print(f"num_processes={nest.num_processes}")
     delay = 0.5
 
     ##################################################
     # Create neurons and devices
 
-    excitatory_pop = nest.Create(model, NE, params=epop_params)
-    inhibitory_pop = nest.Create(model, NI, params=ipop_params)
+    excitatory_pop = nest.Create(model, NE, params=eparams)
+    inhibitory_pop = nest.Create(model, NI, params=iparams)
 
     poisson_0 = nest.Create("poisson_generator", params={"rate": 2400.0})
 
@@ -99,7 +97,7 @@ def run_sim(scale, model, seed=123):
     ##################################################
     # Define synapse specifications
 
-    receptor_types = excitatory_pop[0].get("receptor_types")
+    receptor_types = nest.GetDefaults(model)["receptor_types"]
 
     ie_syn_spec = {
         "synapse_model": "static_synapse",
@@ -157,6 +155,7 @@ def run_sim(scale, model, seed=123):
         "receptor_type": receptor_types["AMPA"],
     }
 
+
     ##################################################
     # Create connections
 
@@ -194,27 +193,26 @@ def run_sim(scale, model, seed=123):
     nest.Connect(inhibitory_pop, sr_inhibitory)
 
     ##################################################
-
     tic = time.time()
     nest.Simulate(1000.0)
-    toc = time.time()
 
+    ##################################################
+    # Collect data from simulation
     num_ex = sr_excitatory.n_events
     num_in = sr_inhibitory.n_events
 
     return {"rate_ex": num_ex / NE,
             "rate_in": num_in / NI,
-            "time": toc - tic
-    }
+            "time": time.time() - tic}
 
-with open(outfile, "w") as f:
-    f.write("time_approx,time_exact,rate_ex_approx,rate_in_approx,rate_ex_exact,rate_in_exact,scale\n")
+if not os.path.isfile(outfile):
+    with open(outfile, "w") as f:
+        f.write("time_approx,time_exact,rate_ex_approx,rate_in_approx,rate_ex_exact,rate_in_exact,scale\n")
 
-scales = [0.2, 0.5, 1, 2, 4, 8]
-for i, scale in enumerate(scales):
-    res_app = run_sim(scale, model="iaf_bw_2001", seed=i+1)
-    res_exa = run_sim(scale, model="iaf_bw_2001_exact")
+res_app = run_sim(scale, model="iaf_bw_2001", seed=runner_id+1)
+res_exa = run_sim(scale, model="iaf_bw_2001_exact", seed=runner_id+1)
+print(f"Execution time: {res_exa['time']} s")
 
-    with open(outfile, "a") as f:
-        f.writelines(f"{res_app['time']},{res_exa['time']},{res_app['rate_ex']},{res_app['rate_in']},{res_exa['rate_ex']},{res_exa['rate_in']},{scale}\n")
+with open(outfile, "a") as f:
+    f.writelines(f"{res_app['time']},{res_exa['time']},{res_app['rate_ex']},{res_app['rate_in']},{res_exa['rate_ex']},{res_exa['rate_in']},{scale}\n")
 

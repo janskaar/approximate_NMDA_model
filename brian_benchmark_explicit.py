@@ -7,10 +7,12 @@ runner_id = int(sys.argv[1])
 scale = float(sys.argv[2])
 n_threads = int(os.environ["SLURM_CPUS_PER_TASK"])
 
-outfile = os.path.join(f"benchmarking_data_{n_threads}_threads",  f"wang_benchmark_brian_{runner_id}.csv")
+outfile = os.path.join(f"benchmarking_data_{n_threads}_threads",  f"wang_benchmark_brian_explicit_{runner_id}.csv")
 
 # Makes brian use OMP, see https://brian2.readthedocs.io/en/stable/user/computation.html#multi-threading-with-openmp
+
 prefs.devices.cpp_standalone.openmp_threads = n_threads
+print(f"Running with {n_threads} threads")
 
 set_device("cpp_standalone", build_on_run=False)
 
@@ -48,7 +50,7 @@ tau_NMDA_rise = 2.0 * ms  # NMDA synapse rise
 tau_NMDA_decay = 100.0 * ms  # NMDA synapse decay
 tau_GABA = 5.0 * ms  # GABA synapse decay
 alpha = 0.5 * kHz  # saturation of NMDA channels at high presynaptic firing rates
-C = 1 * mmole  # extracellular magnesium concentration
+Mg2 = 1 # extracellular magnesium concentration
 
 # Synaptic conductances
 gextE = 2.1 * nS  # external -> excitatory neurons (AMPA)
@@ -70,9 +72,6 @@ eqsE = """
    I_AMPA = s_AMPA * (V - V_E) : amp
    ds_AMPA / dt = - s_AMPA / tau_AMPA : siemens
 
-   I_NMDA = gEEN * s_NMDA_tot * (V - V_E) / ( 1 + exp(-0.062 * V/mvolt) * (C/mmole / 3.57) ) : amp
-   s_NMDA_tot : 1
-
    I_GABA = s_GABA * (V - V_I) : amp
    ds_GABA / dt = - s_GABA / tau_GABA : siemens
 
@@ -81,8 +80,8 @@ eqsE = """
 
    I_input : amp
 
-   ds_NMDA / dt = - s_NMDA / tau_NMDA_decay + alpha * x * (1 - s_NMDA) : 1
-   dx / dt = - x / tau_NMDA_rise : 1
+   I_NMDA  = gEEN * (V - V_E) / (1 + Mg2 * exp(-0.062 * V / mV) / 3.57) * s_NMDA_tot : amp
+   s_NMDA_tot : 1
 """
 
 eqsI = """
@@ -91,16 +90,23 @@ eqsI = """
    I_AMPA = s_AMPA * (V - V_E) : amp
    ds_AMPA / dt = - s_AMPA / tau_AMPA : siemens
 
-   I_NMDA = gEIN * s_NMDA_tot * (V - V_E) / ( 1 + exp(-0.062 * V/mvolt) * (C/mmole / 3.57) ): amp
-   s_NMDA_tot : 1
-
    I_GABA = s_GABA * (V - V_I) : amp
    ds_GABA / dt = - s_GABA / tau_GABA : siemens
 
    I_AMPA_ext = s_AMPA_ext * (V - V_E) : amp
    ds_AMPA_ext / dt = - s_AMPA_ext / tau_AMPA : siemens
+
+   I_NMDA  = gEIN * (V - V_E) / (1 + Mg2 * exp(-0.062 * V / mV) / 3.57) * s_NMDA_tot : amp
+   s_NMDA_tot : 1
+
 """
 
+eqsNMDA = """
+    s_NMDA_tot_post = w_NMDA * s_NMDA : 1 (summed)
+    ds_NMDA / dt = - s_NMDA / tau_NMDA_decay + alpha * x * (1 - s_NMDA) : 1 (clock-driven)
+    dx / dt = - x / tau_NMDA_rise : 1 (clock-driven)
+    w_NMDA : 1
+"""
 
 defaultclock.dt = 0.1 * ms
 
@@ -119,27 +125,14 @@ C_EI_AMPA = Synapses(popE, popI, on_pre='s_AMPA += gEIA', delay=0.5 * ms, name='
 C_EI_AMPA.connect()
 
 # Recurrent excitatory -> excitatory connections mediated by NMDA receptors
-C_EE_NMDA = Synapses(popE, popE, on_pre='x_pre += 1', delay=0.5 * ms, name='C_EE_NMDA', method="rk4")
-C_EE_NMDA.connect(j='i')
+C_EE_NMDA = Synapses(popE, popE, model=eqsNMDA, on_pre='x += 1', delay=0.5 * ms, name='C_EE_NMDA', method="rk4")
+C_EE_NMDA.connect()
+C_EE_NMDA.w_NMDA[:] = 1
 
-# Dummy population to store the summed activity of the three populations
-NMDA_sum_group = NeuronGroup(1, 's : 1', name='NMDA_sum_group', method="rk4")
-
-# Sum the activity according to the subpopulation labels
-NMDA_sum = Synapses(popE, NMDA_sum_group, 's_post = s_NMDA_pre : 1 (summed)', name='NMDA_sum', method="rk4")
-NMDA_sum.connect(j='label_pre')
-
-# Propagate the summed activity to the NMDA synapses
-NMDA_set_total_E = Synapses(NMDA_sum_group, popE,
-                            '''w : 1 (constant)
-                               s_NMDA_tot_post = w*s_pre : 1 (summed)''', name='NMDA_set_total_E', method="rk4")
-NMDA_set_total_E.connect()
-NMDA_set_total_E.w = 1
-
-# Recurrent excitatory -> inhibitory connections mediated by NMDA receptors
-NMDA_set_total_I = Synapses(NMDA_sum_group, popI,
-                            '''s_NMDA_tot_post = s_pre : 1 (summed)''', name='NMDA_set_total_I', method="rk4")
-NMDA_set_total_I.connect()
+# Recurrent excitatory -> excitatory connections mediated by NMDA receptors
+C_EI_NMDA = Synapses(popE, popI, model=eqsNMDA, on_pre='x += 1', delay=0.5 * ms, name='C_EI_NMDA', method="rk4")
+C_EI_NMDA.connect()
+C_EI_NMDA.w_NMDA[:] = 1
 
 # Recurrent inhibitory -> excitatory connections mediated by GABA receptors
 C_IE = Synapses(popI, popE, on_pre='s_GABA += gIE', delay=0.5 * ms, name='C_IE', method="rk4")
@@ -167,12 +160,15 @@ popI.V = -70 * mV
 RE = PopulationRateMonitor(popE)
 RI = PopulationRateMonitor(popI)
 
+SME = StateMonitor(popE, True, 1)
+SMI = StateMonitor(popI, True, 1)
+
 if not os.path.isfile(outfile):
     with open(outfile, "w") as f:
         f.write("time_brian,rate_ex,rate_in,scale\n")
 
 run(runtime)
-device.build(directory=f"brian_benchmark_standalone_{runner_id}", run=False)
+device.build(directory=f"brian_benchmark_explicit_standalone_{runner_id}_{n_threads}", run=False)
 
 tic = time.time()
 device.run()
