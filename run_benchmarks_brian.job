@@ -1,0 +1,35 @@
+#!/bin/bash
+#SBATCH --job-name="brian_benchmark"
+#SBATCH --output=R-%x.%j.out
+#SBATCH --error=R-%x.%j.err
+#SBATCH --account=jinb33
+#SBATCH --partition=dc-cpu
+#SBATCH --time=4:00:00
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=8
+#SBATCH --hint=nomultithread
+#SBATCH --exclusive
+
+# Note: exclusive prevents different srun steps from running on the same
+# CPU cores (useful when running, e.g., job arrays)
+
+module load Stages/2025 GCC CMake ParaStationMPI GSL Python SciPy-Stack HDF5 h5py Boost Autotools jemalloc JUBE
+
+source jemalloc.sh
+
+export OMP_DISPLAY_ENV=VERBOSE
+export OMP_DISPLAY_AFFINITY=TRUE
+
+# For Slurm version >22.05: cpus-per-task has to be set again for srun.
+# Reason: the number of cpus per task specified for salloc or sbatch is not
+# automatically inherithed by srun and must, if desired, be requested again
+export SRUN_CPUS_PER_TASK=$SLURM_CPUS_PER_TASK
+
+srun --ntasks=1 --exclusive python brian_benchmark.py 1 0.25
+srun --ntasks=1 --exclusive python brian_benchmark.py 2 0.5
+srun --ntasks=1 --exclusive python brian_benchmark.py 3 1.0
+srun --ntasks=1 --exclusive python brian_benchmark.py 4 2.0
+srun --ntasks=1 --exclusive python brian_benchmark.py 5 4.0
+srun --ntasks=1 --exclusive python brian_benchmark.py 6 8.0
+
