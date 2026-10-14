@@ -27,7 +27,7 @@ If you only want to use the model, you do not need this repository. The models s
 ## Dependencies
 
 - **NEST 3.8** ([Zenodo](https://doi.org/10.5281/zenodo.12624784)). The two neuron models used, `iaf_bw_2001` and `iaf_bw_2001_exact`, are part of the NEST distribution, so no custom build is required.
-- **Brian2** 2.6–2.9, used only by the two benchmark scripts.
+- **Brian2** 2.9, used only by the two benchmark scripts.
 - **numpy, scipy, matplotlib, seaborn, pandas, h5py**.
 
 ## Reproducing the figures
